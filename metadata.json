@@ -1,6 +1,0 @@
-{
-  "name": "NEXUS Retail - Hệ Thống Laptop & Sửa Chữa Máy Tính",
-  "description": "Chuỗi siêu thị phân phối laptop chính hãng, PC gaming và trung tâm bảo dưỡng sửa chữa máy tính lấy liền 30 phút toàn quốc.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
