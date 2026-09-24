@@ -1,0 +1,6 @@
+{
+  "name": "Giao diện Quản trị & Bố cục Sidebar",
+  "description": "Bảng điều khiển quản trị với thanh bên thu gọn, danh sách hoạt động phân trang và các thẻ chỉ số (metric cards) tích hợp thanh tiến trình dự án trực quan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
