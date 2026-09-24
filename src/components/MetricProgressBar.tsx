@@ -25,11 +25,11 @@ export const MetricProgressBar: React.FC<MetricProgressBarProps> = ({
       className="w-full mb-3.5 pb-2 border-b border-slate-100/80 space-y-1.5"
     >
       <div className="flex items-center justify-between text-xs">
-        <span className="text-[11px] font-medium text-slate-500 truncate" title={label}>
+        <span className="text-[11px] font-medium text-slate-400 truncate" title={label}>
           {label}
         </span>
         {showPercentBadge && (
-          <span className="text-[11px] font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded-md">
+          <span className="text-[11px] font-bold text-slate-200 bg-slate-800/80 px-1.5 py-0.5 rounded-md font-mono">
             {safePercent}%
           </span>
         )}

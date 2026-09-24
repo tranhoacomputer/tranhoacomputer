@@ -1,518 +1,945 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  LayoutDashboard,
-  FolderGit2,
-  FileText,
-  Users,
-  Settings,
-  Bell,
-  Search,
-  Menu,
-  X,
-  ChevronLeft,
-  ChevronRight,
-  LogOut,
-  Layers,
-  ArrowUpRight,
-  CheckCircle2,
+  loadDatabase,
+  subscribeToDatabaseChanges,
+  formatVND,
+} from './db/storage';
+import { ShopDatabase, Product, ServiceItem, CartItem, UserAccount } from './types/shop';
+import { useTheme } from './context/ThemeContext';
+import { MegaHeader } from './components/MegaHeader';
+import { MegaMenuHero } from './components/MegaMenuHero';
+import { FlashSaleSection } from './components/FlashSaleSection';
+import { ProductCard } from './components/ProductCard';
+import { ProductDetailModal } from './components/ProductDetailModal';
+import { ServiceCard } from './components/ServiceCard';
+import { BookingModal } from './components/BookingModal';
+import { OrderTrackerModal } from './components/OrderTrackerModal';
+import { CartDrawer } from './components/CartDrawer';
+import { AdminPanel } from './components/AdminPanel';
+import { TradeInModal } from './components/TradeInModal';
+import { PCBuilderModal } from './components/PCBuilderModal';
+import { StoreLocatorModal } from './components/StoreLocatorModal';
+import { ProductCompareModal } from './components/ProductCompareModal';
+import { InstallmentModal } from './components/InstallmentModal';
+import { AuthModal } from './components/AuthModal';
+import { UserAccountModal } from './components/UserAccountModal';
+import { TechStoreRichContent } from './components/TechStoreRichContent';
+import { MobileBottomNav } from './components/MobileBottomNav';
+import { FloatingContactWidget } from './components/FloatingContactWidget';
+import { Footer } from './components/Footer';
+import {
+  Wrench,
+  ShieldCheck,
+  Cpu,
+  MapPin,
+  Phone,
   Clock,
-  Filter
+  Mail,
+  CheckCircle2,
+  SlidersHorizontal,
+  Sparkles,
+  ArrowRightLeft,
+  X,
+  CreditCard,
+  Truck,
+  Flame,
+  Award,
+  Percent,
 } from 'lucide-react';
-import { NavItem } from './types';
-import { mockActivities, mockMetrics } from './data';
-import { MetricProgressBar } from './components/MetricProgressBar';
 
-const navItems: NavItem[] = [
-  { id: 'dashboard', label: 'Bảng điều khiển', iconName: 'LayoutDashboard', active: true },
-  { id: 'projects', label: 'Dự án', iconName: 'FolderGit2', badge: '12' },
-  { id: 'documents', label: 'Tài liệu', iconName: 'FileText' },
-  { id: 'team', label: 'Thành viên nhóm', iconName: 'Users' },
-  { id: 'integrations', label: 'Tích hợp dịch vụ', iconName: 'Layers', badge: 'Mới' },
-  { id: 'settings', label: 'Cài đặt hệ thống', iconName: 'Settings' },
-];
+export function App() {
+  const { isDark } = useTheme();
+  const [db, setDb] = useState<ShopDatabase>(() => loadDatabase());
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const [selectedCity, setSelectedCity] = useState(() => db.settings.targetProvince || 'Hải Phòng');
 
-export default function App() {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  // Product filtering, brands & sorting
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [selectedBrand, setSelectedBrand] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'default' | 'price_asc' | 'price_desc'>('default');
 
-  // Pagination state for Recent Activities
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 4;
-  const totalItems = mockActivities.length;
-  const totalPages = Math.ceil(totalItems / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = Math.min(startIndex + itemsPerPage, totalItems);
-  const currentActivities = mockActivities.slice(startIndex, endIndex);
+  // Comparison State (like TGDD / FPT Shop)
+  const [comparedProducts, setComparedProducts] = useState<Product[]>([]);
+  const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
 
-  const handlePageChange = (page: number) => {
-    if (page >= 1 && page <= totalPages) {
-      setCurrentPage(page);
+  // Modals state
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [isBookingOpen, setIsBookingOpen] = useState(false);
+  const [bookingService, setBookingService] = useState<ServiceItem | null>(null);
+  const [isTrackerOpen, setIsTrackerOpen] = useState(false);
+  const [trackerInitialCode, setTrackerInitialCode] = useState('');
+  const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isTradeInOpen, setIsTradeInOpen] = useState(false);
+  const [isPCBuilderOpen, setIsPCBuilderOpen] = useState(false);
+  const [isStoreLocatorOpen, setIsStoreLocatorOpen] = useState(false);
+
+  // Installment & Auth Modals state
+  const [isInstallmentOpen, setIsInstallmentOpen] = useState(false);
+  const [installmentProduct, setInstallmentProduct] = useState<Product | null>(null);
+  const [installmentCartItems, setInstallmentCartItems] = useState<CartItem[] | undefined>(undefined);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [isUserAccountOpen, setIsUserAccountOpen] = useState(false);
+
+  // Cart state stored in localStorage
+  const [cart, setCart] = useState<CartItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('nexus_cart_items');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
     }
+  });
+
+  // Toast feedback
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  // Reactive DB subscription
+  useEffect(() => {
+    const unsubscribe = subscribeToDatabaseChanges((updatedDb) => {
+      setDb(updatedDb);
+    });
+    return unsubscribe;
+  }, []);
+
+  // Sync cart to localStorage
+  useEffect(() => {
+    localStorage.setItem('nexus_cart_items', JSON.stringify(cart));
+  }, [cart]);
+
+  // Cart Operations
+  const handleAddToCart = (product: Product, quantity = 1) => {
+    setCart((prev) => {
+      const existing = prev.find((item) => item.productId === product.id);
+      if (existing) {
+        return prev.map((item) =>
+          item.productId === product.id ? { ...item, quantity: item.quantity + quantity } : item
+        );
+      }
+      return [
+        ...prev,
+        {
+          productId: product.id,
+          name: product.name,
+          price: product.price,
+          quantity,
+          imageUrl: product.imageUrl,
+          specsSnippet: product.specs.cpu || product.specs.gpu || Object.values(product.specs)[0],
+        },
+      ];
+    });
+
+    setToastMsg(`Đã thêm "${product.name}" vào giỏ hàng!`);
+    setTimeout(() => setToastMsg(null), 2500);
   };
 
-  const getTabTitle = (tabId: string) => {
-    const found = navItems.find((n) => n.id === tabId);
-    return found ? found.label : 'Bảng điều khiển';
+  const handleUpdateCartQuantity = (productId: string, delta: number) => {
+    setCart((prev) =>
+      prev
+        .map((item) => {
+          if (item.productId === productId) {
+            const newQty = item.quantity + delta;
+            return newQty > 0 ? { ...item, quantity: newQty } : null;
+          }
+          return item;
+        })
+        .filter(Boolean) as CartItem[]
+    );
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'Hoạt động':
-        return 'bg-emerald-100 text-emerald-800';
-      case 'Chờ duyệt':
-        return 'bg-amber-100 text-amber-800';
-      case 'Đang xử lý':
-        return 'bg-blue-100 text-blue-800';
-      case 'Đã lưu trữ':
-        return 'bg-slate-100 text-slate-700';
-      default:
-        return 'bg-slate-100 text-slate-700';
-    }
+  const handleRemoveFromCart = (productId: string) => {
+    setCart((prev) => prev.filter((item) => item.productId !== productId));
   };
 
-  const getActivityIcon = (iconType: string) => {
-    switch (iconType) {
-      case 'folder':
-        return <FolderGit2 className="w-4 h-4 text-indigo-500 shrink-0" />;
-      case 'file':
-        return <FileText className="w-4 h-4 text-blue-500 shrink-0" />;
-      case 'layers':
-        return <Layers className="w-4 h-4 text-purple-500 shrink-0" />;
-      default:
-        return <FileText className="w-4 h-4 text-slate-500 shrink-0" />;
-    }
+  const handleClearCart = () => {
+    setCart([]);
   };
 
-  const getIcon = (name: string, className = 'w-5 h-5') => {
-    switch (name) {
-      case 'LayoutDashboard':
-        return <LayoutDashboard className={className} />;
-      case 'FolderGit2':
-        return <FolderGit2 className={className} />;
-      case 'FileText':
-        return <FileText className={className} />;
-      case 'Users':
-        return <Users className={className} />;
-      case 'Layers':
-        return <Layers className={className} />;
-      case 'Settings':
-        return <Settings className={className} />;
-      default:
-        return <LayoutDashboard className={className} />;
-    }
+  // Compare Handler
+  const handleToggleCompare = (product: Product) => {
+    setComparedProducts((prev) => {
+      const exists = prev.some((p) => p.id === product.id);
+      if (exists) {
+        return prev.filter((p) => p.id !== product.id);
+      }
+      if (prev.length >= 2) {
+        setToastMsg('Bạn chỉ có thể so sánh tối đa 2 sản phẩm cùng lúc');
+        setTimeout(() => setToastMsg(null), 2500);
+        return [prev[1], product];
+      }
+      return [...prev, product];
+    });
   };
+
+  // Filtered Products
+  const brandsList = ['all', 'ASUS', 'Apple', 'Lenovo', 'Dell', 'NEXUS', 'Samsung', 'Logitech'];
+
+  const filteredProducts = db.products
+    .filter((p) => {
+      if (selectedCategory !== 'all' && p.category !== selectedCategory) return false;
+      if (selectedBrand !== 'all' && p.brand !== selectedBrand) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchesName = p.name.toLowerCase().includes(q);
+        const matchesBrand = p.brand?.toLowerCase().includes(q);
+        const matchesDesc = p.description.toLowerCase().includes(q);
+        const matchesSpecs = Object.values(p.specs).some((v) => v?.toLowerCase().includes(q));
+        if (!matchesName && !matchesBrand && !matchesDesc && !matchesSpecs) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'price_asc') return a.price - b.price;
+      if (sortBy === 'price_desc') return b.price - a.price;
+      return 0;
+    });
+
+  const cartTotalCount = cart.reduce((s, i) => s + i.quantity, 0);
+
+  // If Admin panel is open, render Admin workspace
+  if (isAdminOpen) {
+    return (
+      <AdminPanel
+        db={db}
+        onExitAdmin={() => setIsAdminOpen(false)}
+      />
+    );
+  }
 
   return (
-    <div id="app-container" className="flex h-screen w-full bg-slate-50 text-slate-900 font-sans antialiased overflow-hidden">
-      {/* Mobile Backdrop Overlay */}
-      {mobileMenuOpen && (
+    <div
+      className={`min-h-screen flex flex-col pb-16 lg:pb-0 selection:bg-sky-500 selection:text-white transition-colors duration-200 ${
+        isDark ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-800'
+      }`}
+    >
+      {/* Toast Notification (Relocated to top right with close button, preventing obstruction of bottom floating actions) */}
+      {toastMsg && (
+        <div className="fixed top-20 sm:top-24 right-4 sm:right-6 z-50 bg-slate-900/95 text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 text-xs font-bold border border-sky-500/80 backdrop-blur-md animate-in slide-in-from-top-3">
+          <div className="w-6 h-6 rounded-lg bg-sky-500 text-white flex items-center justify-center shrink-0">
+            <CheckCircle2 className="w-3.5 h-3.5" />
+          </div>
+          <span className="max-w-xs">{toastMsg}</span>
+          <button
+            type="button"
+            onClick={() => setToastMsg(null)}
+            className="ml-2 text-slate-400 hover:text-white p-1 rounded cursor-pointer transition-colors"
+            title="Đóng thông báo"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Floating Product Comparison Dock (TGDD / FPT Shop feature) */}
+      {comparedProducts.length > 0 && (
         <div
-          id="mobile-backdrop"
-          onClick={() => setMobileMenuOpen(false)}
-          className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-xs transition-opacity md:hidden"
-          aria-hidden="true"
+          className={`fixed bottom-20 lg:bottom-4 left-1/2 -translate-x-1/2 z-40 px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-4 backdrop-blur-md text-xs font-semibold border-2 border-sky-500 ${
+            isDark ? 'bg-slate-900/95 text-white' : 'bg-white/95 text-slate-900 shadow-xl'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <ArrowRightLeft className="w-4 h-4 text-sky-500" />
+            <span>Đang so sánh ({comparedProducts.length}/2 sản phẩm)</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {comparedProducts.map((p) => (
+              <span
+                key={p.id}
+                className={`px-2.5 py-1 rounded-lg border max-w-[150px] truncate text-[11px] font-bold ${
+                  isDark
+                    ? 'bg-slate-950 border-slate-700 text-slate-200'
+                    : 'bg-sky-50 border-sky-200 text-sky-900'
+                }`}
+              >
+                {p.name}
+              </span>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {comparedProducts.length >= 2 ? (
+              <button
+                type="button"
+                onClick={() => setIsCompareModalOpen(true)}
+                className="px-4 py-1.5 bg-sky-500 hover:bg-sky-600 text-white font-bold rounded-xl cursor-pointer shadow-xs"
+              >
+                Xem So Sánh Chi Tiết
+              </button>
+            ) : (
+              <span className={`text-[11px] italic font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                (Chọn thêm 1 sản phẩm để đối chiếu)
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setComparedProducts([])}
+              className={`p-1 cursor-pointer ${isDark ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-900'}`}
+              title="Đóng so sánh"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 1. MEGA TOP HEADER (Location, Smart Search, Utilities, Hot Links) */}
+      <MegaHeader
+        settings={db.settings}
+        websiteContent={db.websiteContent}
+        currentUser={db.currentUser}
+        cartCount={cartTotalCount}
+        onOpenCart={() => setIsCartOpen(true)}
+        onOpenBooking={() => {
+          setBookingService(null);
+          setIsBookingOpen(true);
+        }}
+        onOpenTracker={() => setIsTrackerOpen(true)}
+        onOpenStoreLocator={() => setIsStoreLocatorOpen(true)}
+        onOpenTradeIn={() => setIsTradeInOpen(true)}
+        onOpenPCBuilder={() => setIsPCBuilderOpen(true)}
+        onOpenInstallmentModal={() => {
+          setInstallmentProduct(null);
+          setInstallmentCartItems(cart);
+          setIsInstallmentOpen(true);
+        }}
+        onOpenAuthModal={() => setIsAuthOpen(true)}
+        onOpenUserAccount={() => setIsUserAccountOpen(true)}
+        onToggleAdmin={() => setIsAdminOpen(true)}
+        isAdminOpen={isAdminOpen}
+        searchQuery={searchQuery}
+        onSearchChange={(q) => {
+          setSearchQuery(q);
+          if (q.trim()) {
+            document.getElementById('products')?.scrollIntoView({ behavior: 'smooth' });
+          }
+        }}
+        selectedCity={selectedCity}
+        onSelectCity={setSelectedCity}
+        onSelectCategory={(cat) => {
+          setSelectedCategory(cat);
+          document.getElementById('products')?.scrollIntoView({ behavior: 'smooth' });
+        }}
+        onScrollToSection={(secId) => {
+          document.getElementById(secId)?.scrollIntoView({ behavior: 'smooth' });
+        }}
+      />
+
+      {/* 2. MEGA MENU & HERO CAMPAIGN SLIDER (Left menu + Center slider + Right mini banners) */}
+      {db.websiteContent?.sectionVisibility?.showHeroSlider !== false && (
+        <MegaMenuHero
+          settings={db.settings}
+          banners={db.banners}
+          onSelectCategory={(cat) => {
+            setSelectedCategory(cat);
+            document.getElementById('products')?.scrollIntoView({ behavior: 'smooth' });
+          }}
+          onOpenTradeIn={() => setIsTradeInOpen(true)}
+          onOpenPCBuilder={() => setIsPCBuilderOpen(true)}
+          onOpenBooking={() => {
+            setBookingService(null);
+            setIsBookingOpen(true);
+          }}
+          onExploreFlashSale={() => {
+            document.getElementById('flash-sale')?.scrollIntoView({ behavior: 'smooth' });
+          }}
+          onOpenInstallment={() => {
+            setInstallmentProduct(null);
+            setInstallmentCartItems(cart.length > 0 ? cart : undefined);
+            setIsInstallmentOpen(true);
+          }}
         />
       )}
 
-      {/* Sidebar Navigation */}
-      <aside
-        id="app-sidebar"
-        className={`fixed inset-y-0 left-0 z-50 flex flex-col bg-white border-r border-slate-200 transition-all duration-300 ease-in-out md:static
-          ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-          ${collapsed ? 'md:w-20' : 'md:w-64'}
-          w-72 shadow-lg md:shadow-none`}
-      >
-        {/* Sidebar Header / Logo */}
-        <div
-          id="sidebar-header"
-          className="flex items-center justify-between h-16 px-4 border-b border-slate-100"
-        >
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-indigo-600 text-white font-bold text-lg shrink-0 shadow-sm">
-              Q
-            </div>
-            {!collapsed && (
-              <div className="flex flex-col min-w-0">
-                <span className="font-semibold text-slate-900 tracking-tight truncate text-base">
-                  Quản Trị Hệ Thống
-                </span>
-                <span className="text-xs text-slate-500 font-medium truncate">
-                  Không gian Doanh nghiệp
-                </span>
-              </div>
-            )}
-          </div>
+      {/* 3. FLASH SALE "GIỜ VÀNG GIÁ SỐC" WITH LIVE COUNTDOWN TIMER */}
+      {db.websiteContent?.sectionVisibility?.showFlashSale !== false && db.websiteContent?.flashSaleActive !== false && (
+        <FlashSaleSection
+          products={db.products}
+          title={db.websiteContent?.flashSaleTitle}
+          subtitle={db.websiteContent?.flashSaleSubtitle}
+          hours={db.websiteContent?.flashSaleHours}
+          onAddToCart={handleAddToCart}
+          onViewDetails={(p) => setSelectedProduct(p)}
+          onOpenInstallment={(p) => {
+            setInstallmentProduct(p);
+            setIsInstallmentOpen(true);
+          }}
+        />
+      )}
 
-          {/* Close button on Mobile */}
-          <button
-            id="mobile-close-button"
-            type="button"
-            onClick={() => setMobileMenuOpen(false)}
-            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-md md:hidden"
-            aria-label="Đóng thanh bên"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Sidebar Navigation Links */}
-        <nav id="sidebar-nav" className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {navItems.map((item) => {
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                id={`nav-item-${item.id}`}
-                type="button"
-                onClick={() => {
-                  setActiveTab(item.id);
-                  setMobileMenuOpen(false);
-                }}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                  isActive
-                    ? 'bg-indigo-50 text-indigo-700'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                } ${collapsed ? 'md:justify-center' : ''}`}
-                title={collapsed ? item.label : undefined}
-              >
-                <span className={isActive ? 'text-indigo-600' : 'text-slate-400'}>
-                  {getIcon(item.iconName)}
-                </span>
-                {!collapsed && (
-                  <>
-                    <span className="flex-1 text-left truncate">{item.label}</span>
-                    {item.badge && (
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
-                          isActive
-                            ? 'bg-indigo-200/60 text-indigo-800'
-                            : 'bg-slate-200 text-slate-700'
-                        }`}
-                      >
-                        {item.badge}
-                      </span>
-                    )}
-                  </>
-                )}
-              </button>
-            );
-          })}
-        </nav>
-
-        {/* Sidebar Footer with Desktop Collapse Toggle & User Profile */}
-        <div id="sidebar-footer" className="p-3 border-t border-slate-100 space-y-2">
-          {/* Desktop Collapse / Expand Button */}
-          <button
-            id="desktop-collapse-toggle"
-            type="button"
-            onClick={() => setCollapsed(!collapsed)}
-            className="hidden md:flex items-center gap-2 w-full p-2 text-xs font-medium text-slate-500 hover:bg-slate-100 rounded-lg transition-colors justify-center"
-            title={collapsed ? 'Mở rộng thanh bên' : 'Thu gọn thanh bên'}
-          >
-            {collapsed ? (
-              <ChevronRight className="w-4 h-4 text-slate-500" />
-            ) : (
-              <>
-                <ChevronLeft className="w-4 h-4 text-slate-500" />
-                <span>Thu gọn thanh bên</span>
-              </>
-            )}
-          </button>
-
-          {/* User Profile Card */}
+      {/* 4. MAIN CONTENT WORKSPACE */}
+      <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-16 w-full text-left">
+        {/* BANNER ĐẶC QUYỀN BÁN HÀNG TỈNH / THÀNH PHỐ */}
+        {db.websiteContent?.sectionVisibility?.showShowroomsStrip !== false && (
           <div
-            id="user-profile-card"
-            className={`flex items-center gap-3 p-2 rounded-lg bg-slate-50 border border-slate-200/70 ${
-              collapsed ? 'md:justify-center' : ''
+            className={`p-5 sm:p-6 rounded-3xl border transition-all ${
+              isDark
+                ? 'bg-gradient-to-r from-sky-950/40 via-slate-900 to-cyan-950/40 border-sky-900/40 shadow-xl'
+                : 'bg-gradient-to-r from-sky-50 via-white to-cyan-50 border-sky-200 shadow-sm'
             }`}
           >
-            <div className="w-8 h-8 rounded-full bg-slate-300 flex items-center justify-center font-medium text-xs text-slate-700 shrink-0">
-              NA
-            </div>
-            {!collapsed && (
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold text-slate-800 truncate leading-tight">
-                  Nguyễn Văn An
-                </p>
-                <p className="text-xs text-slate-500 truncate leading-tight">
-                  an.nguyen@doanhnghiep.vn
-                </p>
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-sky-500/20">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-sky-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-sky-500/30">
+                  <MapPin className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className={`text-base sm:text-lg font-black font-mono uppercase ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                      Trung Tâm Phân Phối Trọng Điểm: {db.settings.targetProvince || 'Hải Phòng'}
+                    </h3>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      Phục Vụ 24/7
+                    </span>
+                  </div>
+                  <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                    {db.settings.provinceDeliveryNotice || `Giao hỏa tốc 1 - 2 giờ toàn bộ nội thành ${db.settings.targetProvince || 'Hải Phòng'} · Hỗ trợ kỹ thuật viên kiểm tra tận nơi`}
+                  </p>
+                </div>
               </div>
-            )}
-            {!collapsed && (
-              <button
-                id="logout-button"
-                type="button"
-                title="Đăng xuất"
-                className="text-slate-400 hover:text-slate-600 p-1 rounded transition-colors"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
-            )}
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInstallmentProduct(null);
+                    setInstallmentCartItems(cart);
+                    setIsInstallmentOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold transition-colors cursor-pointer shadow-md shadow-amber-500/20"
+                >
+                  <Percent className="w-3.5 h-3.5" />
+                  <span>Trả Góp 0% Lãi Suất</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsStoreLocatorOpen(true)}
+                  className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition-colors cursor-pointer ${
+                    isDark
+                      ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                      : 'bg-white hover:bg-slate-100 text-slate-800 border-slate-200'
+                  }`}
+                >
+                  <MapPin className="w-3.5 h-3.5 text-sky-500" />
+                  <span>Xem Showroom Trực Tiếp</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 4 Phương thức phục vụ chuẩn tỉnh thành */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4">
+              <div className="flex items-start gap-3">
+                <div className={`p-2 rounded-xl shrink-0 ${isDark ? 'bg-sky-950/80 text-sky-400' : 'bg-sky-100 text-sky-700'}`}>
+                  <MapPin className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className={`text-xs font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>1. Mua Tại Cửa Hàng</div>
+                  <div className={`text-[11px] mt-0.5 leading-snug ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                    Trải nghiệm máy thực tế tại showroom, kỹ thuật viên cài phần mềm miễn phí
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <div className={`p-2 rounded-xl shrink-0 ${isDark ? 'bg-sky-950/80 text-sky-400' : 'bg-sky-100 text-sky-700'}`}>
+                  <Truck className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className={`text-xs font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>2. Hỏa Tốc {db.settings.provinceExpressHours || '1-2H'}</div>
+                  <div className={`text-[11px] mt-0.5 leading-snug ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                    Giao nhanh nội thành {db.settings.targetProvince || 'Hải Phòng'}, miễn phí ship từ {formatVND(db.settings.provinceFreeShipThreshold || 500000)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <div className={`p-2 rounded-xl shrink-0 ${isDark ? 'bg-emerald-950/80 text-emerald-400' : 'bg-emerald-100 text-emerald-700'}`}>
+                  <ShieldCheck className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className={`text-xs font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>3. Ship COD & VietQR</div>
+                  <div className={`text-[11px] mt-0.5 leading-snug ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                    Đồng kiểm trước khi thanh toán, hỗ trợ tiền mặt hoặc quét mã VietQR 24/7
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <div className={`p-2 rounded-xl shrink-0 ${isDark ? 'bg-amber-950/80 text-amber-400' : 'bg-amber-100 text-amber-700'}`}>
+                  <Percent className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className={`text-xs font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>4. Trả Góp 0% Lãi Suất</div>
+                  <div className={`text-[11px] mt-0.5 leading-snug ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                    Duyệt hồ sơ online 5 phút qua CCCD hoặc thẻ tín dụng. Hotline: {db.settings.installmentHotline || db.settings.hotline}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      </aside>
+        )}
 
-      {/* Main Content Area */}
-      <div id="main-content-wrapper" className="flex flex-col flex-1 h-full min-w-0 overflow-hidden">
-        {/* Top Navbar */}
-        <header
-          id="top-navbar"
-          className="flex items-center justify-between h-16 px-4 sm:px-6 bg-white border-b border-slate-200 shrink-0"
-        >
-          <div className="flex items-center gap-3">
-            {/* Hamburger Button (Mobile Only) */}
-            <button
-              id="mobile-menu-toggle"
-              type="button"
-              onClick={() => setMobileMenuOpen(true)}
-              className="p-2 -ml-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg md:hidden"
-              aria-label="Open sidebar menu"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-
-            {/* Breadcrumb / Title */}
+        {/* ================= PRODUCT CATALOG SECTION ================= */}
+        {db.websiteContent?.sectionVisibility?.showCatalog !== false && (
+        <section id="products" className="space-y-6 scroll-mt-24">
+          {/* Section Header */}
+          <div
+            className={`flex flex-col md:flex-row md:items-end justify-between gap-4 border-b pb-5 ${
+              isDark ? 'border-slate-800' : 'border-slate-200'
+            }`}
+          >
             <div>
-              <h1 id="page-title" className="text-lg font-semibold text-slate-900 leading-tight">
-                {getTabTitle(activeTab)}
-              </h1>
-              <p className="text-xs text-slate-500 hidden sm:block">
-                Không gian làm việc &gt; Tổng quan &gt; {getTabTitle(activeTab)}
+              <div
+                className={`inline-flex items-center gap-1.5 text-xs font-mono font-bold uppercase tracking-wider ${
+                  isDark ? 'text-sky-400' : 'text-sky-600'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{db.websiteContent?.catalogBadge || 'KHO HÀNG CHÍNH HÃNG VNA - 38 SIÊU THỊ'}</span>
+              </div>
+              <h2 className={`text-2xl sm:text-3xl font-black mt-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                {db.websiteContent?.catalogTitle || 'Laptop, PC Gaming & Linh Kiện Tuyển Chọn'}
+              </h2>
+              <p className={`text-xs sm:text-sm mt-1 max-w-xl font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                {db.websiteContent?.catalogSubtitle || 'Tất cả sản phẩm đều được kiểm tra nhiệt độ kỹ lưỡng, cài sẵn Windows bản quyền và bảo hành 1 đổi 1 tận nơi.'}
               </p>
             </div>
-          </div>
 
-          {/* Top Actions: Search, Notifications */}
-          <div className="flex items-center gap-2 sm:gap-4">
-            <div id="global-search-container" className="relative hidden sm:block w-48 md:w-64">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                id="global-search-input"
-                type="text"
-                placeholder="Tìm kiếm dự án, tài liệu..."
-                className="w-full pl-9 pr-3 py-1.5 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all placeholder:text-slate-400"
-              />
-            </div>
-
-            <button
-              id="notification-bell-button"
-              type="button"
-              className="relative p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
-              aria-label="Thông báo"
-            >
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-indigo-600 rounded-full ring-2 ring-white" />
-            </button>
-
-            <a
-              id="view-php-site-link"
-              href="/index.php"
-              target="_blank"
-              rel="noreferrer"
-              className="hidden lg:inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs sm:text-sm font-medium rounded-lg transition-colors border border-slate-200"
-              title="Mở giao diện website PHP cPanel"
-            >
-              <span>Xem Web PHP</span>
-              <ArrowUpRight className="w-3.5 h-3.5" />
-            </a>
-
-            <button
-              id="header-action-button"
-              type="button"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-medium rounded-lg shadow-xs transition-colors"
-            >
-              <span>Tạo mới</span>
-              <ArrowUpRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </header>
-
-        {/* Scrollable Main Content */}
-        <main
-          id="main-scroll-content"
-          className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-slate-50 space-y-6"
-        >
-          {/* Header Metric / Summary Cards Grid with Progress Bars at top */}
-          <section id="metrics-grid" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {mockMetrics.map((metric) => (
+            {/* Filter Tabs & Sort Dropdown */}
+            <div className="flex flex-wrap items-center gap-3">
               <div
-                key={metric.id}
-                id={metric.id}
-                className="p-5 bg-white border border-slate-200 rounded-xl shadow-2xs hover:border-slate-300 transition-colors flex flex-col justify-between"
+                className={`flex items-center rounded-2xl p-1 text-xs border ${
+                  isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'
+                }`}
               >
-                {/* Thanh tiến trình (Progress Bar) đặt ở đầu mỗi metric card */}
-                <MetricProgressBar
-                  id={`${metric.id}-progress`}
-                  percent={metric.progressPercent}
-                  label={metric.progressStatus}
-                  colorClass={metric.progressColor}
-                  trackClass={metric.trackColor}
-                />
-
-                <div className="flex items-center justify-between text-slate-500 mb-2">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                    {metric.title}
-                  </span>
-                  {metric.iconName === 'FolderGit2' && <FolderGit2 className={`w-4 h-4 ${metric.iconColor}`} />}
-                  {metric.iconName === 'Clock' && <Clock className={`w-4 h-4 ${metric.iconColor}`} />}
-                  {metric.iconName === 'Users' && <Users className={`w-4 h-4 ${metric.iconColor}`} />}
-                  {metric.iconName === 'CheckCircle2' && <CheckCircle2 className={`w-4 h-4 ${metric.iconColor}`} />}
-                </div>
-                <div className="text-2xl font-bold text-slate-900">{metric.value}</div>
-                <p className={`text-xs ${metric.changeColor} mt-1 font-medium flex items-center gap-1`}>
-                  <span>{metric.changeText}</span>
-                </p>
+                {[
+                  { id: 'all', label: 'Tất cả' },
+                  { id: 'laptop', label: 'Laptop' },
+                  { id: 'pc_gaming', label: 'PC Lắp Ráp' },
+                  { id: 'component', label: 'Linh Kiện' },
+                  { id: 'accessory', label: 'Phụ Kiện' },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setSelectedCategory(tab.id)}
+                    className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer font-bold ${
+                      selectedCategory === tab.id
+                        ? 'bg-sky-500 text-white shadow-xs'
+                        : isDark
+                        ? 'text-slate-400 hover:text-white'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
               </div>
+
+              {/* Sort Selector */}
+              <div
+                className={`flex items-center rounded-2xl px-3 py-1.5 text-xs border ${
+                  isDark
+                    ? 'bg-slate-900 border-slate-800 text-slate-300'
+                    : 'bg-white border-slate-200 text-slate-700 shadow-xs'
+                }`}
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5 mr-1.5 text-sky-500" />
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as any)}
+                  className={`bg-transparent focus:outline-none cursor-pointer font-semibold ${
+                    isDark ? 'text-white' : 'text-slate-900'
+                  }`}
+                >
+                  <option value="default" className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'}>
+                    Sắp xếp mặc định
+                  </option>
+                  <option value="price_asc" className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'}>
+                    Giá: Thấp đến Cao
+                  </option>
+                  <option value="price_desc" className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'}>
+                    Giá: Cao đến Thấp
+                  </option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Brand Filter Pills (TGDD / FPT Shop Signature) */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+            <span className={`text-xs font-bold shrink-0 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+              Thương hiệu:
+            </span>
+            {brandsList.map((brand) => (
+              <button
+                key={brand}
+                type="button"
+                onClick={() => setSelectedBrand(brand)}
+                className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                  selectedBrand === brand
+                    ? 'bg-sky-500 text-white border-sky-500 shadow-xs'
+                    : isDark
+                    ? 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                    : 'bg-white border-slate-200 text-slate-700 hover:text-slate-900 hover:border-slate-300 shadow-xs'
+                }`}
+              >
+                {brand === 'all' ? 'Tất cả thương hiệu' : brand}
+              </button>
             ))}
-          </section>
+          </div>
 
-          {/* Responsive Content Table / List */}
-          <section
-            id="recent-activities-section"
-            className="bg-white border border-slate-200 rounded-xl shadow-2xs overflow-hidden"
-          >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between p-5 border-b border-slate-100 gap-3">
-              <div>
-                <h2 className="text-base font-semibold text-slate-900">
-                  Hoạt động &amp; Cập nhật gần đây
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Tổng hợp các thay đổi mã nguồn, tài liệu và hoạt động mới nhất.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  id="filter-activity-button"
-                  type="button"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors"
-                >
-                  <Filter className="w-3.5 h-3.5" />
-                  <span>Bộ lọc</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table id="activity-table" className="w-full text-left text-sm text-slate-600">
-                <thead className="bg-slate-50/70 border-b border-slate-100 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  <tr>
-                    <th scope="col" className="px-5 py-3.5">Tên đối tượng</th>
-                    <th scope="col" className="px-5 py-3.5">Phân loại</th>
-                    <th scope="col" className="px-5 py-3.5">Trạng thái</th>
-                    <th scope="col" className="px-5 py-3.5">Thời gian cập nhật</th>
-                    <th scope="col" className="px-5 py-3.5 text-right">Thao tác</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {currentActivities.map((act) => (
-                    <tr key={act.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="px-5 py-4 font-medium text-slate-900 flex items-center gap-2">
-                        {getActivityIcon(act.iconType)}
-                        <span className="truncate">{act.name}</span>
-                      </td>
-                      <td className="px-5 py-4 text-xs text-slate-500 whitespace-nowrap">{act.category}</td>
-                      <td className="px-5 py-4 whitespace-nowrap">
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusBadge(
-                            act.status
-                          )}`}
-                        >
-                          {act.status}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4 text-xs text-slate-500 whitespace-nowrap">{act.dateModified}</td>
-                      <td className="px-5 py-4 text-right whitespace-nowrap">
-                        <button type="button" className="text-indigo-600 hover:text-indigo-800 font-medium text-xs">
-                          Xem chi tiết
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination Control */}
+          {/* Product Grid: 3-column desktop */}
+          {filteredProducts.length === 0 ? (
             <div
-              id="activity-pagination-control"
-              className="flex flex-col sm:flex-row items-center justify-between px-5 py-3.5 border-t border-slate-100 bg-white gap-3 text-xs sm:text-sm text-slate-600"
+              className={`py-16 text-center rounded-2xl border space-y-2 ${
+                isDark ? 'bg-slate-900/40 border-slate-800/80' : 'bg-white border-slate-200'
+              }`}
             >
-              <div id="pagination-info" className="text-slate-500 text-xs sm:text-sm">
-                Hiển thị{' '}
-                <span className="font-semibold text-slate-900">{startIndex + 1}</span>{' '}
-                đến{' '}
-                <span className="font-semibold text-slate-900">{endIndex}</span>{' '}
-                trong tổng số{' '}
-                <span className="font-semibold text-slate-900">{totalItems}</span>{' '}
-                hoạt động
+              <div className={`text-sm font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                Không tìm thấy sản phẩm phù hợp với bộ lọc
               </div>
-
-              <div id="pagination-actions" className="flex items-center gap-1 sm:gap-2">
-                {/* Previous Page Button */}
-                <button
-                  id="pagination-prev-btn"
-                  type="button"
-                  onClick={() => handlePageChange(currentPage - 1)}
-                  disabled={currentPage === 1}
-                  className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-                    currentPage === 1
-                      ? 'border-slate-200 text-slate-300 bg-slate-50 cursor-not-allowed'
-                      : 'border-slate-200 text-slate-700 bg-white hover:bg-slate-50 hover:text-slate-900 shadow-2xs'
-                  }`}
-                  aria-label="Trang trước"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                  <span>Trước</span>
-                </button>
-
-                {/* Page Number Buttons */}
-                <div id="pagination-pages" className="flex items-center gap-1">
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => {
-                    const isCurrent = pageNum === currentPage;
-                    return (
-                      <button
-                        key={pageNum}
-                        id={`pagination-page-btn-${pageNum}`}
-                        type="button"
-                        onClick={() => handlePageChange(pageNum)}
-                        aria-current={isCurrent ? 'page' : undefined}
-                        className={`min-w-8 h-8 px-2 flex items-center justify-center text-xs rounded-lg font-medium transition-colors ${
-                          isCurrent
-                            ? 'bg-indigo-600 text-white font-semibold shadow-2xs'
-                            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                        }`}
-                      >
-                        {pageNum}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Next Page Button */}
-                <button
-                  id="pagination-next-btn"
-                  type="button"
-                  onClick={() => handlePageChange(currentPage + 1)}
-                  disabled={currentPage === totalPages}
-                  className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-                    currentPage === totalPages
-                      ? 'border-slate-200 text-slate-300 bg-slate-50 cursor-not-allowed'
-                      : 'border-slate-200 text-slate-700 bg-white hover:bg-slate-50 hover:text-slate-900 shadow-2xs'
-                  }`}
-                  aria-label="Trang sau"
-                >
-                  <span>Sau</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
+              <p className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                Hãy thử đổi từ khóa tìm kiếm hoặc chọn danh mục khác.
+              </p>
             </div>
-          </section>
-        </main>
-      </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredProducts.map((product) => (
+                <ProductCard
+                  key={product.id}
+                  product={product}
+                  onAddToCart={handleAddToCart}
+                  onViewDetails={(p) => setSelectedProduct(p)}
+                  onCompare={handleToggleCompare}
+                  isCompared={comparedProducts.some((p) => p.id === product.id)}
+                  onOpenInstallment={(p) => {
+                    setInstallmentProduct(p);
+                    setIsInstallmentOpen(true);
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+        )}
+
+        {/* ================= REPAIR SERVICES & LAB SECTION ================= */}
+        {db.websiteContent?.sectionVisibility?.showServices !== false && (
+        <section id="services" className="space-y-6 pt-4 scroll-mt-24">
+          <div
+            className={`flex flex-col md:flex-row md:items-end justify-between gap-4 border-b pb-5 ${
+              isDark ? 'border-slate-800' : 'border-slate-200'
+            }`}
+          >
+            <div>
+              <div className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-emerald-600 uppercase tracking-wider">
+                <Wrench className="w-3.5 h-3.5" />
+                <span>{db.websiteContent?.servicesBadge || 'TRUNG TÂM KỸ THUẬT TIÊU CHUẨN ISO'}</span>
+              </div>
+              <h2 className={`text-2xl sm:text-3xl font-black mt-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                {db.websiteContent?.servicesTitle || 'Dịch Vụ Sửa Chữa & Bảo Dưỡng Máy Tính Lấy Liền'}
+              </h2>
+              <p className={`text-xs sm:text-sm mt-1 max-w-2xl font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                {db.websiteContent?.servicesSubtitle || 'Khách hàng quan sát trực tiếp kỹ thuật viên thao tác trong 30-60 phút. Ký tên lên từng linh kiện, cam kết không tráo đổi đồ.'}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setBookingService(null);
+                setIsBookingOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-sky-500 hover:bg-sky-600 active:bg-sky-700 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shadow-md whitespace-nowrap"
+            >
+              <Wrench className="w-3.5 h-3.5" />
+              <span>Đặt Lịch Khám Máy Lấy Ngay</span>
+            </button>
+          </div>
+
+          {/* Service Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {db.services.map((service) => (
+              <ServiceCard
+                key={service.id}
+                service={service}
+                onBookService={(srv) => {
+                  setBookingService(srv);
+                  setIsBookingOpen(true);
+                }}
+              />
+            ))}
+          </div>
+
+          {/* Retail Chain Trust Pledges (4 Badges) */}
+          {db.websiteContent?.sectionVisibility?.showTrustPledges !== false && (
+          <div
+            className={`mt-8 p-6 rounded-3xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 border transition-colors ${
+              isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
+            }`}
+          >
+            {(db.websiteContent?.trustPledges && db.websiteContent.trustPledges.length > 0
+              ? db.websiteContent.trustPledges
+              : [
+                  { id: 'p1', title: '100% Minh Bạch', description: 'Báo giá trước khi sửa chữa. Khách hàng ký nhận bo mạch và linh kiện.', iconType: 'shield' },
+                  { id: 'p2', title: 'Lấy Liền 30-60 Phút', description: 'Xử lý sự cố phần cứng, thay màn hình, vệ sinh máy ngay tại phòng lab mở.', iconType: 'clock' },
+                  { id: 'p3', title: 'Trả Góp 0% Lãi Suất', description: 'Hỗ trợ trả góp qua thẻ tín dụng và CCCD gắn chip chỉ 5 phút duyệt.', iconType: 'card' },
+                  { id: 'p4', title: '1 Đổi 1 Trong 30 Ngày', description: 'Lỗi phần cứng do nhà sản xuất được đổi máy mới ngay lập tức.', iconType: 'award' },
+                ]
+            ).map((pledge, pIdx) => {
+              const icons = [ShieldCheck, Clock, CreditCard, Award];
+              const IconComp = icons[pIdx % icons.length];
+              const colorClasses = [
+                isDark ? 'bg-emerald-950 text-emerald-400 border-emerald-800/60' : 'bg-emerald-50 text-emerald-600 border-emerald-200',
+                isDark ? 'bg-sky-950 text-sky-400 border-sky-800/60' : 'bg-sky-50 text-sky-600 border-sky-200',
+                isDark ? 'bg-sky-950 text-sky-400 border-sky-800/60' : 'bg-sky-50 text-sky-600 border-sky-200',
+                isDark ? 'bg-amber-950 text-amber-400 border-amber-800/60' : 'bg-amber-50 text-amber-600 border-amber-200',
+              ];
+              return (
+                <div key={pledge.id || pIdx} className="flex items-start gap-3">
+                  <div className={`p-2.5 rounded-2xl shrink-0 border ${colorClasses[pIdx % colorClasses.length]}`}>
+                    <IconComp className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className={`text-xs font-bold uppercase tracking-wider font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                      {pledge.title}
+                    </h4>
+                    <p className={`text-[11px] mt-1 leading-relaxed font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                      {pledge.description}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          )}
+        </section>
+        )}
+
+        {/* ================= COMPREHENSIVE STORE CONTENT & BUYING GUIDES ================= */}
+        {db.websiteContent?.sectionVisibility?.showTechArticles !== false && (
+        <TechStoreRichContent
+          settings={db.settings}
+          onSelectBrand={(brand) => {
+            setSelectedBrand(brand);
+            document.getElementById('products')?.scrollIntoView({ behavior: 'smooth' });
+          }}
+          onOpenInstallmentModal={() => {
+            setInstallmentProduct(null);
+            setInstallmentCartItems(cart.length > 0 ? cart : undefined);
+            setIsInstallmentOpen(true);
+          }}
+          onOpenBookingModal={() => {
+            setBookingService(null);
+            setIsBookingOpen(true);
+          }}
+          onOpenStoreLocator={() => setIsStoreLocatorOpen(true)}
+        />
+        )}
+
+      </main>
+
+      {/* Upgraded Professional Global Footer */}
+      <Footer
+        settings={db.settings}
+        websiteContent={db.websiteContent}
+        onOpenAdmin={() => setIsAdminOpen(true)}
+        onOpenTracker={() => setIsTrackerOpen(true)}
+        onOpenBooking={() => {
+          setBookingService(null);
+          setIsBookingOpen(true);
+        }}
+        onOpenTradeIn={() => setIsTradeInOpen(true)}
+        onOpenPCBuilder={() => setIsPCBuilderOpen(true)}
+        onOpenInstallment={() => {
+          setInstallmentProduct(null);
+          setInstallmentCartItems(cart.length > 0 ? cart : undefined);
+          setIsInstallmentOpen(true);
+        }}
+        onSelectCategory={(cat) => setSelectedCategory(cat)}
+      />
+
+      {/* Modals & Drawers */}
+      {selectedProduct && (
+        <ProductDetailModal
+          product={selectedProduct}
+          onClose={() => setSelectedProduct(null)}
+          onAddToCart={handleAddToCart}
+          onOpenInstallment={(prod) => {
+            setInstallmentProduct(prod);
+            setIsInstallmentOpen(true);
+          }}
+        />
+      )}
+
+      {isBookingOpen && (
+        <BookingModal
+          services={db.services}
+          preselectedService={bookingService}
+          onClose={() => setIsBookingOpen(false)}
+          onSuccess={(code) => {
+            setTrackerInitialCode(code);
+            setToastMsg(`Đã tạo lịch hẹn thành công với mã ${code}!`);
+          }}
+        />
+      )}
+
+      {isTrackerOpen && (
+        <OrderTrackerModal
+          orders={db.orders}
+          initialQuery={trackerInitialCode}
+          onClose={() => setIsTrackerOpen(false)}
+        />
+      )}
+
+      {isTradeInOpen && (
+        <TradeInModal
+          isOpen={isTradeInOpen}
+          onClose={() => setIsTradeInOpen(false)}
+          onSuccess={(code) => {
+            setTrackerInitialCode(code);
+            setToastMsg(`Đăng ký thu cũ đổi mới thành công với mã ${code}!`);
+          }}
+        />
+      )}
+
+      {isPCBuilderOpen && (
+        <PCBuilderModal
+          isOpen={isPCBuilderOpen}
+          onClose={() => setIsPCBuilderOpen(false)}
+          buildPackages={db.pcBuildPackages}
+          onAddCustomBuildToCart={(buildProduct) => {
+            handleAddToCart(buildProduct);
+            setToastMsg(`Đã thêm dàn ${buildProduct.name} vào giỏ hàng!`);
+          }}
+        />
+      )}
+
+      {isStoreLocatorOpen && (
+        <StoreLocatorModal
+          isOpen={isStoreLocatorOpen}
+          onClose={() => setIsStoreLocatorOpen(false)}
+          branches={db.branches}
+        />
+      )}
+
+      {isCompareModalOpen && (
+        <ProductCompareModal
+          isOpen={isCompareModalOpen}
+          onClose={() => setIsCompareModalOpen(false)}
+          products={comparedProducts}
+          onAddToCart={handleAddToCart}
+        />
+      )}
+
+      {/* 0% Installment Registration Modal */}
+      {isInstallmentOpen && (
+        <InstallmentModal
+          isOpen={isInstallmentOpen}
+          onClose={() => {
+            setIsInstallmentOpen(false);
+            setInstallmentProduct(null);
+            setInstallmentCartItems(undefined);
+          }}
+          product={installmentProduct}
+          cartItems={installmentCartItems}
+          settings={db.settings}
+          currentUser={db.currentUser}
+          onSuccess={(orderCode) => {
+            setTrackerInitialCode(orderCode);
+            setToastMsg(`Đã tạo hồ sơ trả góp 0% thành công! Mã đơn: ${orderCode}`);
+          }}
+        />
+      )}
+
+      {/* Fast 1-Click Authentication Modal */}
+      {isAuthOpen && (
+        <AuthModal
+          isOpen={isAuthOpen}
+          onClose={() => setIsAuthOpen(false)}
+          settings={db.settings}
+          onLoginSuccess={(user: UserAccount) => {
+            setToastMsg(`Chào mừng ${user.name}! Đăng nhập thành công.`);
+          }}
+        />
+      )}
+
+      {/* User Profile & Order History Modal */}
+      {isUserAccountOpen && db.currentUser && (
+        <UserAccountModal
+          isOpen={isUserAccountOpen}
+          onClose={() => setIsUserAccountOpen(false)}
+          currentUser={db.currentUser}
+          orders={db.orders}
+          settings={db.settings}
+          onLogout={() => {
+            setToastMsg('Đã đăng xuất tài khoản.');
+          }}
+          onSelectOrderTracking={(orderCode) => {
+            setIsUserAccountOpen(false);
+            setTrackerInitialCode(orderCode);
+            setIsTrackerOpen(true);
+          }}
+        />
+      )}
+
+      <CartDrawer
+        isOpen={isCartOpen}
+        onClose={() => setIsCartOpen(false)}
+        items={cart}
+        onUpdateQuantity={handleUpdateCartQuantity}
+        onRemoveItem={handleRemoveFromCart}
+        onClearCart={handleClearCart}
+        settings={db.settings}
+        branches={db.branches}
+        currentUser={db.currentUser}
+        onOpenAuthModal={() => {
+          setIsCartOpen(false);
+          setIsAuthOpen(true);
+        }}
+        onOpenInstallmentModal={(items) => {
+          setIsCartOpen(false);
+          setInstallmentProduct(null);
+          setInstallmentCartItems(items);
+          setIsInstallmentOpen(true);
+        }}
+        onOrderSuccess={(code) => {
+          setTrackerInitialCode(code);
+          setToastMsg(`Đặt hàng thành công! Mã đơn của bạn là ${code}`);
+        }}
+      />
+
+      {/* Floating Fast Support Widget (Hotline + Zalo + Scroll To Top) */}
+      <FloatingContactWidget settings={db.settings} />
+
+      {/* Mobile-First Bottom Ergonomic Navigation Bar (Thumb Zone) */}
+      <MobileBottomNav
+        cartCount={cartTotalCount}
+        currentUser={db.currentUser}
+        onGoHome={() => {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+        onOpenCategories={() => {
+          document.getElementById('products')?.scrollIntoView({ behavior: 'smooth' });
+        }}
+        onOpenInstallment={() => {
+          setInstallmentProduct(null);
+          setInstallmentCartItems(cart.length > 0 ? cart : undefined);
+          setIsInstallmentOpen(true);
+        }}
+        onOpenCart={() => setIsCartOpen(true)}
+        onOpenAccount={() => {
+          if (db.currentUser) {
+            setIsUserAccountOpen(true);
+          } else {
+            setIsAuthOpen(true);
+          }
+        }}
+      />
     </div>
   );
 }
 
+export default App;
